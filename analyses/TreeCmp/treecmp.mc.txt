@@ -1,0 +1,2 @@
+Tree	Tree_taxa	RefTree_taxa	Common_taxa	MatchingCluster	MatchingCluster_toYuleAvg	MatchingCluster_toUnifAvg
+1	109	86	86	711.0000	0.9385	0.6125

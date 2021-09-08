@@ -1,0 +1,5 @@
+ID	V1	V2	symdist	symbiont	Var
+4465_G_4465_G	4465_G	4465_G	0	Pseudomonadales	H6_PNM
+4465_H_4465_G	4465_H	4465_G	4.7908e-06	Pseudomonadales	H6_PNM
+4465_G_4465_H	4465_G	4465_H	4.7908e-06	Pseudomonadales	H6_PNM
+4465_H_4465_H	4465_H	4465_H	0	Pseudomonadales	H6_PNM

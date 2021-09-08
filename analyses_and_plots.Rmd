@@ -1,0 +1,632 @@
+---
+title: "Plax - Analyses and plots"
+author: "Anna Mankowski"
+date: "16/04/2021"
+output: html_document
+---
+
+# Load libraries
+
+```{r Load libraries, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library("phyloseq")
+library("ape")
+library("rareNMtests")
+library("ggplot2")
+library("ggpmisc")
+library("vegan")
+library("gridExtra")
+library("plyr")
+library("MASS")
+library("gdata")
+library("dplyr")
+library("reshape2")
+library("forcats")
+library("patchwork")
+library("phytools")
+library("igraph")
+library("Hmisc")
+library("optparse")
+library("reshape2")
+library("stringr")
+library("ggpubr")
+library("maps")
+library("mapdata")
+library("data.table")
+library("ade4")
+library("tidyverse")
+library("spaa")
+library("geodist")
+library("visNetwork")
+library("cooccur")
+library("tidyr")
+library("FSA")
+```
+
+# Load and format data
+
+```{r Load and format data, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+### Abundance data
+# Per host individual
+
+data.matrix<-read.csv("./data/abundance-matrix.tsv", header=T, row.names=1, sep="\t")
+data.table<-read.csv("./data/abundance-table.tsv", sep="\t", header=T)
+
+### Metadata
+
+metadata<-read.csv("./data/metadata.tsv", sep="\t", header=T)
+metadata.phyloseq<-read.csv("./data/metadata.tsv", sep="\t", header=T, row.names=1)
+
+## Taxonomy 
+
+taxonomy<-read.csv("./data/taxonomy-combined.csv", sep="\t", header=F)
+names(taxonomy)<-c("symbiont", "T1", "T2", "T3", "T4", "T5", "T6")
+
+### Host and symbiont phylogenies
+
+# Host
+
+host.tree.all<-read.tree("./data/host-tree.newick")
+
+#  Symbionts
+
+symbiont.tree.all<-read.tree("./data/symbiont-tree.newick")
+
+### Vectors of host species and symbiont clade names in phylogenetic order for data organization
+
+hosts<-scan("./data/host-labels", character(), quote="")
+symbionts<-scan("./data/symbiont-labels", character(), quote="")
+symbiont.reps<-scan("./data/symbiont-rep-labels", character(), quote="")
+taxonomies<-scan("./data/taxonomy-labels", character(), quote="")
+
+### Prune trees
+
+symbiont.tree.sym<-keep.tip(symbiont.tree.all, symbionts)
+symbiont.tree.reps<-keep.tip(symbiont.tree.all, symbiont.reps)
+symbionts.ordered<-symbiont.tree.reps$tip.label
+symbionts.ordered<-gsub("cluster4$", "Enterobacterales", symbionts.ordered)
+symbionts.ordered<-gsub("cluster20_2", "Flavobacteriales", symbionts.ordered)
+symbionts.ordered<-gsub("cluster70", "Pseudomonadales", symbionts.ordered)
+symbionts.ordered<-gsub("cluster64", "Rhodobacteraceae", symbionts.ordered)
+symbionts.ordered.cluster<-gsub(".*\\.", "", symbionts.ordered)
+host.tree.reps<-keep.tip(host.tree.all, hosts)
+
+### Merge and sort abundance data and metadata
+
+data.table.metadata<-merge(data.table, metadata, by ="lib")
+data.table.metadata<-merge(data.table.metadata, taxonomy, by ="symbiont")
+data.table.metadata$lib<-reorder.factor(data.table.metadata$lib, new.order=hosts)
+data.table.metadata %>% arrange(lib)
+data.table.metadata$T6<-as.factor(data.table.metadata$T6)
+data.table.metadata$T6<-factor(data.table.metadata$T6, levels=taxonomies)
+
+write.csv(data.table.metadata, "./data/merge_data_metadata.tsv", sep="\t", quote=F)
+
+### Physeq object
+
+symbiont.tree.reps$tip.label<-gsub(".*\\.", "", symbiont.tree.reps$tip.label)
+symbiont.tree.reps$tip.label<-gsub("cluster4$", "Enterobacterales", symbiont.tree.reps$tip.label)
+symbiont.tree.reps$tip.label<-gsub("cluster20_2", "Flavobacteriales", symbiont.tree.reps$tip.label)
+symbiont.tree.reps$tip.label<-gsub("cluster70", "Pseudomonadales", symbiont.tree.reps$tip.label)
+symbiont.tree.reps$tip.label<-gsub("cluster64", "Rhodobacteraceae", symbiont.tree.reps$tip.label)
+
+otu<-t(data.matrix)
+otu<-otu[!row.names(otu) %in% "cluster46", ]
+
+OTU<-otu_table(otu, taxa_are_rows=T)
+sampledata<-sample_data(metadata.phyloseq)
+physeq<-phyloseq(OTU, sampledata, symbiont.tree.reps)
+```
+
+```{r Colour vectors echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+symbiont.colors<-c("RETA1-2"="#66CCCC", "Teraskiella1"="#3366CC", "RETA4"="#99CCCC", "Teraskiella2"="#0066CC", "RETA3"="#339999", "Ricketsia1"="#0033FF", "Babeliales1"="#CCCC00", "Fabibacter1"="#006600", "Pseudarciella1"="#009966", "Chlamydia1"="#993399", "Chlamydia2"="#660066", "Schlegelella1"="#660000", "Coxiella1"="#990000", "Limnobacter1"="#993333", "Limnobacter2"="#CC3333", "Vulcaniibacterium1"="#FF3333", "UBA10353"="#CC6666", "Salinisphaera"="#330000", "Sutterella1"="#990033","Ruthmannia"="#CC66FF", "Flavobacteriales"="#66CC99", "Rhodobacteraceae"="#0000CC", "Enterobacterales"="#FF6666", "Pseudomonadales"="#CC6666")
+
+location.colors<-c("BocasdelToro"="#FF6666", "Bremen"="#993399", "CarrieBowCay"="#CC6666", "Hawaii"="#66CC99", "HongKong"="#006600", "Mallorca"="#0066CC", "TwinCays"="#990000", "Vienna"="#660066")
+
+host.colors<-c("H2"="#66CC99", "H3"="#006600", "H4"="#0066CC", "H11"="#0033FF", "H15"="#99CCCC", "H6"="#CC6666", "H7"="#990000", "H8"="#FF6666")
+
+env.colors<-c("aquarium"="#0066CC", "free-living"="#660066")
+
+ab.colors<-c("ABC2"="#66CC99", "ABC3"="#006600", "ABT2"="seagreen3", "ABY"="#009966", "ABN"="#990000")
+scm=function(palette=ab.colors) {
+  scale_color_manual(values=ab.colors, breaks=c("ABY", "ABC2", "ABC3", "ABT2", "ABN", NA), na.value="gainsboro")
+}
+```
+
+```{r Plot sampling locations, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+world<-map_data("world")
+
+map.sampling.locations<-ggplot() +
+  geom_polygon(data=world, aes(x=long, y=lat, group=group) , fill="grey")+
+    theme_bw() +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),
+        panel.border=element_blank()) +
+  theme(axis.title=element_blank(), 
+        axis.text=element_blank(), 
+        axis.ticks=element_blank()) +
+  geom_point(data=data.table.metadata, aes(x=longitude, y=latitude, colour=site), size=3) +
+  scale_colour_manual(values=location.colors, name="Sampling Site", breaks=c("BocasdelToro", "CarrieBowCay", "TwinCays", "Mallorca", "Bremen", "Vienna", "HongKong", "Hawaii")) 
+
+map.sampling.locations
+
+ggsave(map.sampling.locations, file="./plots/map.sampling.locations.eps", width=180, height=90, units="mm", limitsize=F)
+
+single.loc<-read.csv("./data/symbionts_single-sites", sep="\t", header=F)
+data.symbionts_single_loc<-subset(data.table.metadata, (T6 %in% levels(single.loc$V1)))
+
+map.symbionts_single_loc<-ggplot() +
+  geom_polygon(data=world, aes(x=long, y=lat, group=group) , fill="grey")+
+    theme_bw() +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(),
+        panel.border=element_blank()) +
+  theme(axis.title=element_blank(), 
+        axis.text=element_blank(), 
+        axis.ticks=element_blank()) +
+  geom_jitter(data=data.symbionts_single_loc, aes(x=longitude, y=latitude, colour=T6), width=5, height=5, size=3) +
+  scale_colour_manual(values=c("Fabibacter1"="#006600", "Pseudarciella1"="#009966", "Babeliales1"="#CCCC00", "Teraskiella2"="#0066CC", "Ricketsia1"="#0033FF", "RETA4"="#99CCCC", "Salinisphaera"="#330000",  "UBA10353"="#CC6666"), name="Symbiont clade") 
+
+map.symbionts_single_loc
+
+ggsave(map.symbionts_single_loc, file="./plots/map.symbionts-single-locs.eps", width=180, height=90, units="mm", limitsize=F)
+```
+
+```{r Rarefaction echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+data.rare.q0<-rarefaction.sample(data.matrix)
+data.rare.q1<-rarefaction.sample(data.matrix, q=1)
+data.rare.q2<-rarefaction.sample(data.matrix, q=2)
+data.rare<-merge(data.rare.q0, data.rare.q1, by="sample-size")
+data.rare<-merge(data.rare, data.rare.q2, by="sample-size")
+names(data.rare)<-c("samples", "q0", "q1", "q2")
+data.rare<-data.rare %>% select(samples, q0, q1, q2) %>% gather(key="variable", value="value", -samples)
+
+rare.plot<-ggplot(data.rare) + 
+  geom_point(aes(x=samples, y=value, colour=variable)) +
+  scale_color_manual(values=c("q2"="darkseagreen1", "q0"="springgreen4","q1"="seagreen3"), 
+                    labels=c("Clade number", "Shannon index", "Inverse Simpson index"),
+                    name="") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(size=12)) +
+  theme(axis.text.y=element_text(size=12)) +
+  theme(legend.position="top") +
+  labs(x="Number of host individuals", y="Symbiont clade richness") 
+
+rare.plot
+
+ggsave(rare.plot, file="./plots/rarefaction.eps", width=210, height=180, units="mm", dpi=300)
+```
+
+```{r Plot abundances , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+abundance.plot<-ggplot(data.table.metadata, aes(fct_rev(T6), fct_rev(lib))) +
+  geom_point(aes(size=abundance, color=T6)) +
+  scale_size_continuous(range=c(1,3),
+                        guide="legend",
+                        name="Relative abundance (%)") +
+  scale_color_manual(values=symbiont.colors, breaks=taxonomies) +
+  theme_minimal() +
+  guides(color=F) +
+  #theme(panel.grid.major=element_line(colour="#CCCCCC")) +
+  theme(legend.position="bottom") + 
+  scale_x_discrete(position="top") +
+  #theme(text=element_text(family="Arial")) + 
+  theme(axis.text.x=element_text(angle=-90, hjust=1, size=5),
+        axis.title.x=element_blank()) +
+  theme(axis.text.y=element_text(size=5),
+        axis.title.y=element_blank())
+
+ggsave(abundance.plot, file="./plots/abundances.eps", width=180, height=250, units="mm", dpi=300)
+
+abundance.plot
+```
+
+```{r Plot differences in AB+/- abundance of contaminations, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+AB.data<-data.table.metadata[, c(1,3,8,20)]
+AB.data[AB.data==""]<-NA
+AB.data<-AB.data[complete.cases(AB.data),]
+AB.data$antibiotics<-ifelse(grepl("ABN", AB.data$antibiotics), "ABN", "ABY")
+
+AB.data$T6<-as.factor(AB.data$T6)
+AB.data$T6<-factor(AB.data$T6, levels=taxonomies)
+
+
+AB.boxplot<-ggplot(AB.data, aes(x=antibiotics, y=abundance)) + 
+  geom_boxplot(aes(fill=antibiotics)) +
+  scale_fill_manual(values=c("#990000", "#009966")) +
+  facet_wrap(~ T6) +
+  theme_minimal()
+
+ggsave(AB.boxplot, file="./plots/ab.boxplot.eps", width=180, height=200, units="mm", dpi=300)
+
+AB.boxplot
+
+set.seed(0)
+for (i in 1:length(levels(AB.data$T6))) {
+  tryCatch({
+    print(levels(AB.data$T6)[i])
+    kt<-kruskal.test(abundance ~ antibiotics, data=AB.data[AB.data$T6==levels(AB.data$T6)[i],])
+    print(kt)
+    }, error=function(e){cat("ERROR:",conditionMessage(e), "\n")})
+}
+
+kt
+```
+
+```{r Generate UniFrac distances, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Create distance matrix with all samples
+set.seed(0)
+
+unifrac.dist<-ordinate(physeq=physeq, method="NMDS", distance="unifrac")
+
+NMDS1<-as.numeric(unifrac.dist$points[,1])
+NMDS2<-as.numeric(unifrac.dist$points[,2])
+
+NMDS1<-as.data.frame(x=NMDS1, row.names=rownames(data.matrix))
+NMDS2<-as.data.frame(x=NMDS2, row.names=rownames(data.matrix))
+
+df.unifrac<-merge(NMDS1, NMDS2, by=0, all=T)
+rownames(df.unifrac)<-df.unifrac$Row.names
+df.unifrac[,1]<-NULL
+
+df.unifrac<-merge(df.unifrac, metadata, by.x=0, by.y="lib", all=T)
+rownames(df.unifrac)<-df.unifrac$Row.names
+df.unifrac[,1]<-NULL
+df.unifrac$lib<-row.names(df.unifrac)
+df.unifrac<-df.unifrac[ which(df.unifrac$NMDS1 != "NA"), ]
+```
+
+```{r UniFrac NMDS with different colorations for different parameters, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE }
+
+### Base and blank plots
+
+df.unifrac[df.unifrac==""]<-NA
+
+unifrac.nmds.base<-ggplot(data=df.unifrac, aes(x=NMDS1, y=NMDS2)) +
+  theme_minimal() +  
+  theme(axis.text=element_text(size=12)) +
+  theme(axis.title=element_text(size=12)) +
+  theme(axis.text.x=element_text(size=12), 
+        axis.text=element_text(size=12)) +
+  labs(y="NMDS2", x="NMDS1") +
+  theme(legend.text=element_text(size=12)) 
+
+unifrac.nmds.blank<-ggplot(data=df.unifrac) + 
+  geom_point(aes(x=NMDS1, y=NMDS2), colour="white", alpha=0) + theme_minimal() +
+  theme(axis.title=element_text(color="white"), 
+        axis.text=element_text(color="white"), 
+        axis.ticks=element_blank(), 
+        panel.grid=element_blank())
+
+unifrac.nmds.type<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, color=type), size=5) +
+  scale_colour_manual(values=host.colors, breaks=c("H11", "H15", "H4", "H7", "H8", "H6", "H3", "H2"))
+legend.type<-get_legend(unifrac.nmds.type)
+plot.legend.type<-as_ggplot(legend.type)
+unifrac.nmds.type<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, color=type), size=5) +
+  scale_colour_manual(values=host.colors, breaks=c("H11", "H15", "H4", "H7", "H8", "H6", "H3", "H2")) +
+  theme(legend.position="none")
+  
+unifrac.nmds.location<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, colour=site), size=5) +
+  scale_colour_manual(values=location.colors, breaks=c("BocasdelToro", "CarrieBowCay", "TwinCays", "Mallorca", "Bremen", "Vienna", "HongKong", "Hawaii"))
+legend.location<-get_legend(unifrac.nmds.location)
+plot.legend.location<-as_ggplot(legend.location)
+unifrac.nmds.location<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, colour=site), size=5) +
+  scale_colour_manual(values=location.colors, breaks=c("BocasdelToro", "CarrieBowCay", "TwinCays", "Mallorca", "Bremen", "Vienna", "HongKong", "Hawaii")) +
+  theme(legend.position="none")
+
+unifrac.nmds.env<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, color=environment), size=5) +
+  scale_colour_manual(values=env.colors, breaks=c("aquarium", "free-living"))
+legend.env<-get_legend(unifrac.nmds.env)
+plot.legend.env<-as_ggplot(legend.env)
+unifrac.nmds.env<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, color=environment), size=5) +
+  scale_colour_manual(values=env.colors, breaks=c("aquarium", "free-living")) +
+  theme(legend.position="none")
+
+unifrac.nmds.ab<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, colour=antibiotics), size=5) +
+  scm()
+legend.ab<-get_legend(unifrac.nmds.ab)
+plot.legend.ab<-as_ggplot(legend.ab)
+unifrac.nmds.ab<-unifrac.nmds.base +
+  geom_point(data=df.unifrac, aes(x=NMDS1, y=NMDS2, colour=antibiotics), size=5) +
+  scm() +
+  theme(legend.position="none")
+
+
+unifrac.plot<-((unifrac.nmds.type | plot.legend.type | unifrac.nmds.env | plot.legend.env) / (unifrac.nmds.location | plot.legend.location | unifrac.nmds.ab | plot.legend.ab))
+
+unifrac.plot
+
+ggsave(unifrac.plot, file="./plots/unifrac.nmds.eps", width=300, height=180, units="mm", dpi=300)
+```
+
+```{r PERMANOVA, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+set.seed(0)
+metadata.sub<-subset(metadata, (lib %in% colnames(otu)))
+adonis.type<-adonis2(distance(physeq, method="unifrac") ~ type, data=metadata.sub, permutations=999)
+adonis.site<-adonis2(distance(physeq, method="unifrac") ~ site, data=metadata.sub, permutations=999)
+adonis.env<-adonis2(distance(physeq, method="unifrac") ~ environment, data=metadata.sub, permutations=999)
+adonis.ab<-adonis2(distance(physeq, method="unifrac") ~ antibiotics, data=metadata.sub, permutations=999)
+
+adonis.type
+adonis.site
+adonis.env
+adonis.ab
+```
+
+```{r Phylosymbiosis, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+### Write host tree 
+
+write.tree(phy=host.tree.reps, file="./analyses/TreeCmp/ht.newick")
+
+### Generate dendrogramm reflecting dissimilarities of symbiont community composition
+
+unifrac<-UniFrac(physeq, F, T, F, T)
+unifrac.clust<-hclust(as.dist(unifrac))
+unifrac.dendro<-as.phylo(unifrac.clust)
+write.tree(phy=unifrac.dendro, file="./analyses/TreeCmp/mt.newick")
+
+### Generate random trees
+
+#random.trees<-rmtree(100000, 109, rooted=T, tip.label=hosts)
+write.tree(phy=random.trees, file="./analyses/TreeCmp/random_trees.newick")
+```
+
+```{bash Calculate congruence RF echo=TRUE}
+cd ./analyses/TreeCmp
+
+# Congruence of host phylogeny vs. symbiont community composition
+
+java -jar /Users/amankows/software/TreeCmp/bin/TreeCmp.jar -r ht.newick -d rf -i mt.newick -o treecmp.rf.txt -P -N
+java -jar /Users/amankows/software/TreeCmp/bin/TreeCmp.jar -r ht.newick -d rf -i random_trees.newick -o treecmp.rf-random.txt -P -N
+
+python ../../scripts/pandas_collate_robinson_foulds_rf.py -i ./treecmp.rf-random.txt,./treecmp.rf.txt
+```
+
+```{bash RF results, eval=FALSE}
+   Tree  Tree_taxa  RefTree_taxa  Common_taxa   R-F  R-F_toYuleAvg  R-F_toUnifAvg
+0     1        109            86           86  67.5         0.8154         0.8146
+
+Summary: Stochatic Comparison
+  Number Columns: 7
+  Number Indices: 100000
+Summary: Host-Microbe Comparison
+  Number Columns: 7
+  Number Indices: 1
+
+Host-Microbe Score:   67.5
+
+Better Score:         0
+Worse Score:          100000
+Equiv Score:          0
+P-value better:       0.0
+
+Better\Equal Score:   0
+Worse Score:          100000
+P-value Better/Equal: 0.0
+
+Max Stochastic Metric:  93.0
+```
+
+```{bash Calculate congruence MC echo=TRUE}
+
+java -jar /Users/amankows/software/TreeCmp/bin/TreeCmp.jar -r ht.newick -d mc -i mt.newick -o treecmp.mc.txt -P -N
+java -jar /Users/amankows/software/TreeCmp/bin/TreeCmp.jar -r ht.newick -d mc -i random_trees.newick -o treecmp.mc-random.txt -P -N
+
+python ../../scripts/pandas_collate_robinson_foulds_mc.py -i ./treecmp.mc-random.txt,./treecmp.mc.txt
+```
+
+```{bash MC results, eval=FALSE}
+   Tree  Tree_taxa  RefTree_taxa  Common_taxa  MatchingCluster  MatchingCluster_toYuleAvg  MatchingCluster_toUnifAvg
+0     1        109            86           86            711.0                     0.9385                     0.6125
+
+Summary: Stochatic Comparison
+  Number Columns: 7
+  Number Indices: 100000
+Summary: Host-Microbe Comparison
+  Number Columns: 7
+  Number Indices: 1
+
+Host-Microbe Score:   711.0
+
+Better Score:         0
+Worse Score:          100000
+Equiv Score:          0
+P-value better:       0.0
+
+Better\Equal Score:   0
+Worse Score:          100000
+P-value Better/Equal: 0.0
+
+Max Stochastic Metric:  1192.0
+Worse Score:          100000
+P-value Better/Equal: 0.0
+
+Max Stochastic Metric:  1192.0
+```
+
+```{r Network of symbiont co-occurences using Spearman's correlations, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+co<-print(cooccur(otu, spp_names=T))
+
+nodes<-data.frame(id=1:nrow(otu),
+                  label=rownames(otu),
+                  color="#CCCCCC",
+                  shadow=F)
+
+edges<-data.frame(from=co$sp1, to=co$sp2,
+                  color=ifelse(co$p_lt <= 0.05, "#990000", "#009966"),
+                  dashes=ifelse(co$p_lt <= 0.05, T, F))
+
+visNetwork(nodes=nodes, edges=edges) %>% visIgraphLayout(layout="layout_with_kk")
+```
+
+```{bash Generate symbiont nucleotide distance matrices, eval=FALSE}
+for f in $(awk '{print $2}' ./data/abundance-table.tsv|sort -u|grep -v symbiont); do Rscript --vanilla ./scripts/gen_symbiont_dist_table.R --symbiont $f --output ./analyses/symbiont_dists/${f}.nt.dist; done
+
+cat * > symbiont.nt.dists
+```
+
+```{r Plot pairwise UniFrac/phylogenetic distance of host/symbiont pairs, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+### Prep
+
+# UniFrac
+
+unifrac.pairwise.dist<-reshape2::melt(as.matrix(unifrac))
+unifrac.pairwise.dist$Var<-paste(unifrac.pairwise.dist$Var1,"_",unifrac.pairwise.dist$Var2, sep="")
+unifrac.pairwise.dist<-unifrac.pairwise.dist[, c("Var", "value")]
+unifrac.pairwise.dist[3]<-"unifrac"
+names(unifrac.pairwise.dist)<-c("ID", "sym_dist", "symbiont")
+
+# Symbionts 
+
+symbiont.pairwise.dist<-read.csv("./analyses/symbiont_dists/symbiont.nt.dists",  sep="\t", header=F)
+symbiont.pairwise.dist$ID<-paste(symbiont.pairwise.dist$V1, "_", symbiont.pairwise.dist$V2, sep="")
+symbiont.pairwise.dist<-symbiont.pairwise.dist[, c("ID", "V3", "V4")]
+names(symbiont.pairwise.dist)<-c("ID", "sym_dist", "symbiont")
+
+# Merge UniFrac and symbiont
+
+unifrac.symbiont.pairwise.dist<-rbind(unifrac.pairwise.dist, symbiont.pairwise.dist)
+
+# Host
+
+host.pairwise.dist<-reshape2::melt(cophenetic(host.tree.reps))
+host.pairwise.dist$Var<-paste(host.pairwise.dist$Var1,"_",host.pairwise.dist$Var2, sep="")
+host.pairwise.dist<-host.pairwise.dist[, c("Var", "value")]
+names(host.pairwise.dist)<-c("ID", "host_dist")
+
+host.pairwise.all.dist.df<-merge(host.pairwise.dist, unifrac.symbiont.pairwise.dist, by="ID")
+host.pairwise.all.dist.df<-merge(host.pairwise.all.dist.df, taxonomy, by="symbiont")
+
+host.pairwise.all.dist.df$T6<-as.factor(host.pairwise.all.dist.df$T6)
+host.pairwise.all.dist.df$T6<-factor(host.pairwise.all.dist.df$T6, levels=taxonomies)
+
+host.pairwise.all.dist.sub.df<-subset(host.pairwise.all.dist.df, (host.pairwise.all.dist.df$T6 %in% c("RETA1-2", "Chlamydia1", "Schlegelella1", "Coxiella1", "Teraskiella1", "Chlamydia2", "Limnobacter1", "Ruthmannia", "Limnobacter2", "Vulcaniibacterium1", "Teraskiella2", "Sutterella1", "RETA3")))
+
+
+
+### Plot
+
+my.lm<-y~x
+
+host.pairwise.dist.plot<-ggplot(data=host.pairwise.all.dist.df, aes(x=host_dist, y=sym_dist)) +
+  geom_point(aes(color=T6), size=1) +
+  scale_colour_manual(values=symbiont.colors) + 
+  geom_density_2d(color="black", size=0.1) +
+  geom_smooth(method='lm', formula=my.lm, color="black", linetype="dotted", size=0.5) +
+  stat_poly_eq(formula=my.lm, 
+               aes(label=..rr.label..), 
+               parse=TRUE) +    
+  facet_wrap(~ T6, scales="free_y", ncol=3) +
+  theme_minimal() +
+  theme(text=element_text(size=5)) +
+  theme(legend.position="none")
+
+ggsave(host.pairwise.dist.plot, file="./plots/pairwise.dist.eps", width=180, height=150, units="mm", dpi=300)
+
+host.pairwise.dist.plot
+```
+
+```{r Export pairwsie distances to calculate Mantel correlation coefficients, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+write.table(host.pairwise.dist, file="./analyses/symbiont_dists/host.nt.dist", quote=F, sep=",", row.names=F)
+```
+
+```{bash Prep phylogenetic comparison of host and symbionts, eval=FALSE}
+cd ./analyses/phylo_dist
+
+cat ../symbiont_dists/symbiont.nt.dists > ./symbiont.nt.dists.mod
+
+for f in $(awk '{print $1}' symbiont.nt.dists.mod|sort -u|grep '^H'); do var=$(echo $f|awk -F"_" '{print $1"_"$4}'); sed -i "s/${f}/$var/g" symbiont.nt.dists.mod; done
+
+sed -i -E 's/(4465_[A-Z])/\1_PNM/g' symbiont.nt.dists.mod
+
+sed -i 's/4465_F/H4/g' symbiont.nt.dists.mod
+
+sed -i 's/4465_[A-Z]/H6/g' symbiont.nt.dists.mod
+
+sed -i 's/SRR5311040/H15_HK/g' symbiont.nt.dists.mod
+
+sed -i 's/SRR5934055/H2_PNM/g' symbiont.nt.dists.mod
+
+sed -i 's/SRR5934125/H2_PNM/g' symbiont.nt.dists.mod
+
+paste <(awk '{print $1"_"$2"\t"$1"\t"$2}' ../symbiont_dists/symbiont.nt.dists) <(cat symbiont.nt.dists.mod) > symbiont.nt.dists.final
+
+paste <(cat symbiont.nt.dists.final) <(awk '{print $4}' symbiont.nt.dists.final) <(awk '{print $5}' symbiont.nt.dists.final)|awk '$8 == $9 {print $1"\t"$2"\t"$3"\t"$6"\t"$7"\t"$8}' > symbiont.nt.dists.same-Htype-loc
+
+paste <(cat symbiont.nt.dists.final) <(awk '{print $4}' symbiont.nt.dists.final|awk -F"_" '{print $1}') <(awk '{print $5}' symbiont.nt.dists.final|awk -F"_" '{print $1}')|awk '$8 == $9 {print $1"\t"$2"\t"$3"\t"$6"\t"$7"\t"$8}' > symbiont.nt.dists.same-Htype
+
+(echo -e "ID\tV1\tV2\tsymdist\tsymbiont" && awk '{print $1"\t"$2"\t"$3"\t"$6"\t"$7}' symbiont.nt.dists.final) > tmp && mv tmp symbiont.nt.dists.final
+
+(echo -e "ID\tV1\tV2\tsymdist\tsymbiont\tVar" && cat symbiont.nt.dists.same-Htype-loc) > tmp && mv tmp symbiont.nt.dists.same-Htype-loc
+
+(echo -e "ID\tV1\tV2\tsymdist\tsymbiont\tVar" && cat symbiont.nt.dists.same-Htype) > tmp && mv tmp symbiont.nt.dists.same-Htype
+
+# made sub dirs for overall/same Htype/same Htype + loc
+
+cd overall
+
+for f in $(tail -n +2 ../symbiont.nt.dists.final|awk '{print $NF}'|sort -u); do (head -n 1 ../symbiont.nt.dists.final && awk -v var=$f '$NF == var' ../symbiont.nt.dists.final) > ${f}_overall.input; done
+
+for f in *input; do awk '{print $0"\tVar"}' $f > tmp && mv tmp $f; done
+
+for f in *input; do Rscript --vanilla ../../../scripts/mantel_host-vs-symbiont.R --symbiont ${f} --host ../host.nt.dist --output ${f%%input}output; done
+
+(echo -e "symbiont\tsample\tvar\tmantel.r\tmantel.p" && for f in *output; do paste <(echo ${f%%_*}) <(echo "overall") <(echo ${f##*_}|sed 's/.output//g') <(tail -n +2 $f); done) > ../mantel.overall
+
+cd ../same-Htype
+
+for f in $(tail -n +2 ../symbiont.nt.dists.same-Htype|awk '{print $5}'|sort -u); do for i in $(grep -w $f ../symbiont.nt.dists.same-Htype|awk '{print $6}'|sort -u); do awk -v var=$f '$(NF-1) == var' ../symbiont.nt.dists.same-Htype|awk -v var=$i '$NF == var' > ${f}_${i}.input; done; done
+
+for f in *input; do (head -n 1 ../symbiont.nt.dists.same-Htype && cat $f) > tmp && mv tmp $f; done
+
+for f in *input; do Rscript --vanilla ../../../scripts/mantel_host-vs-symbiont.R --symbiont ${f} --host ../host.nt.dist --output ${f%%input}output; done
+
+for f in *output; do paste <(echo ${f%%_*}) <(echo ${f##*_}|sed 's/.output//g') <(echo "same-Htype") <(tail -n +2 $f); done >> ../mantel.overall
+
+cd ../same-Htype-loc
+
+for f in $(tail -n +2 ../symbiont.nt.dists.same-Htype-loc|awk '{print $5}'|sort -u); do for i in $(grep -w $f ../symbiont.nt.dists.same-Htype-loc|awk '{print $6}'|sort -u); do awk -v var=$f '$(NF-1) == var' ../symbiont.nt.dists.same-Htype-loc|awk -v var=$i '$NF == var' > ${f}_${i}.input; done; done
+
+for f in *input; do (head -n 1 ../symbiont.nt.dists.same-Htype-loc && cat $f) > tmp && mv tmp $f; done
+
+for f in *input; do mv ${f} ${f/-/}; done
+
+for f in *input; do var=$(echo $f|sed -E 's/(H[0-9]*)_/\1-/g'); mv $f $var; done
+
+for f in *input; do Rscript --vanilla ../../../scripts/mantel_host-vs-symbiont.R --symbiont ${f} --host ../host.nt.dist --output ${f%%input}output; done
+
+for f in *output; do paste <(echo ${f%%_*}) <(echo ${f##*_}|sed 's/.output//g') <(echo "same-Htype-loc") <(tail -n +2 $f); done >> ../mantel.overall
+```
+
+```{r Plot mantel, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+mantel.df<-read.csv("./analyses/phylo_dist/mantel.overall", sep="\t", header=T)
+
+mantel.df$symbiont<-as.character(mantel.df$symbiont)
+mantel.df$symbiont<-factor(mantel.df$symbiont, levels=symbionts.ordered.cluster)
+
+mantel.df$sign<-ifelse(mantel.df$mantel.p <= 0.05, "sig", "nsig")
+
+mantel.df<-merge(mantel.df, taxonomy, by="symbiont")
+mantel.df$T6<-as.factor(mantel.df$T6)
+mantel.df$T6<-factor(mantel.df$T6, levels=taxonomies)
+mantel.df<-mantel.df[complete.cases(mantel.df), ]
+mantel.df$Var<-as.factor(paste(mantel.df$var, mantel.df$sign, sep="_"))
+mantel.df$Var2<-as.factor(paste(mantel.df$var, mantel.df$T6, sep="_"))
+
+
+mantel.overview<-ggplot(mantel.df, aes(x=var, y=mantel.r, na.rm=T)) +
+    geom_point(aes(color=T6, shape=sign), size=3) +
+    scale_color_manual(values=symbiont.colors, breaks=levels(mantel.df$T6)) +
+    guides(color=F) +
+    facet_wrap(~ T6, ncol=3) +
+    theme_minimal() +  
+    theme(axis.text.x=element_text(angle=-270, hjust=1)) 
+
+ggsave(mantel.overview, file="./plots/mantel.overview.eps", width=180, height=240, units="mm", dpi=300)
+
+mantel.overview
+```

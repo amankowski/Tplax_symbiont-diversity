@@ -1,0 +1,2 @@
+Tree	Tree_taxa	RefTree_taxa	Common_taxa	R-F	R-F_toYuleAvg	R-F_toUnifAvg
+1	109	86	86	67.5000	0.8154	0.8146
